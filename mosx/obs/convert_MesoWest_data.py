@@ -11,7 +11,6 @@ def convert_MesoWest_data(filename1, filename2, minute):
     - Precipitation 1hr
     - Precipitation 6hr
 
-    :param station_id: station ID desired
     :filename1: filename of data downloaded directly from Synoptic website
     :filename2: filename of processed csv file suitable for use by MOS-X
     :minute: the minute of hourly observations

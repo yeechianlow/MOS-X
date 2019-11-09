@@ -551,12 +551,13 @@ def predict_all(config, predictor_file, ensemble=False, time_series_date=None, n
                 print('predict: warning: set time series start date to %s (was unspecified)' % time_series_date)
             num_hours = int(24 / config['time_series_interval']) + 1
             predicted_array = predicted_one[-1, 4:].reshape((4, num_hours)).T
+
             # Get dewpoint
-            predicted_array[:, 2] = dewpoint(predicted_array[:, 0], predicted_array[:, 2])
+            predicted_array[:, 1] = dewpoint(predicted_array[:, 0], predicted_array[:, 1])
             times = pd.date_range(time_series_date.replace(hour=6), periods=num_hours,
                               freq='%dH' % config['time_series_interval']).to_pydatetime().tolist()
-            variables = ['temperature', 'rain', 'dewpoint', 'windSpeed']
-            round_dict = {'temperature': 0, 'rain': 2, 'dewpoint': 0, 'windSpeed': 0}
+            variables = ['temperature', 'dewpoint', 'windSpeed', 'rain']
+            round_dict = {'temperature': 0, 'dewpoint': 0, 'windSpeed': 0,'rain': 2}
             predicted_timeseries_one = pd.DataFrame(predicted_array, index=times, columns=variables)
             predicted_timeseries_one = predicted_timeseries_one.round(round_dict)
             predicted_timeseries.append(predicted_timeseries_one)

@@ -257,6 +257,7 @@ def train(config, predictor_file, no_obs=False, no_models=False, test_size=0, ov
             raise ValueError("There must be the same number of estimator files as station IDs")
     else:
         station_ids = [config['station_id']] #just one station
+        estimator_files = [config['Model']['estimator_file']]
     
     if test_size > 0:
         p_train, t_train, r_train, p_test, t_test, r_test = build_train_data(config, predictor_file, no_obs=no_obs,

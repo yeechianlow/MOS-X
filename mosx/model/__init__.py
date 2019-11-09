@@ -8,6 +8,6 @@
 Methods for formatting predictor data and training scikit-learn models.
 """
 
-from model import *
-from predictors import *
-from scorers import *
+from .model import *
+from .predictors import *
+from .scorers import *

@@ -1,4 +1,4 @@
-# MOS-X (modified version of Jonathan Weyn's original repository)
+# AWNMOS (modified version of MOS-X by Jon Weyn for WSU AgWeatherNet)
 
 MOS-X is a machine learning-based forecasting model built in Python designed to produce output tailored for the [WxChallenge](http://www.wxchallenge.com) weather forecasting competition.
 It uses an external executable to download and process time-height profiles of model data from the National Centers for Environmental Prediction (NCEP) Global Forecast System (GFS) and North American Mesoscale (NAM) models.
@@ -10,7 +10,7 @@ These data, along with surface observations from MesoWest, are used to train any
 
 - Python 2 or 3 (for now I get an unpickling error when predicting using Python 3; use with Python 3 with caution and feel free to raise issues.)
 - A workstation with a recent Linux installation... sorry, that's all that will work with the next item...
-- [BUFRgruven](http://strc.comet.ucar.edu/software/bgruven/) - for model data
+- [BUFRgruven](http://strc.comet.ucar.edu/software/bgruven/) - for model data. Has known issues with v19.24, see issues at jweyn/MOS-X
 - An API key for [MesoWest](https://synopticlabs.org/api/mesonet/) - unfortunately the API now has a limited free tier. MOS-X currently does a poor job of data caching so large data sets will exceed the free limit - use with caution.
 - A decent amount of free disk space - some of the models are > 1 GB pickle files... not to mention all the BUFKIT files...
 
@@ -22,7 +22,7 @@ These data, along with surface observations from MesoWest, are used to train any
 - ConfigObj
 - ulmo (use conda-forge)
 - the excellent [scikit-learn](http://scikit-learn.org/stable/index.html)
-- metpy (tested on version 0.7.0; don't use version 0.8 and up because get_upper_air_data no longer exists)
+- siphon (replaces metpy.get_upper_air_data)
 - pint (0.8.1; pint 0.9 will be automatically installed with metpy but there is a bug in it that will cause errors)
 
 ### Installation

@@ -21,7 +21,7 @@ from sklearn.multioutput import MultiOutputRegressor
 from sklearn.pipeline import Pipeline
 from sklearn.model_selection import KFold, train_test_split
 from copy import deepcopy
-from util import get_object
+from mosx.util import get_object
 
 
 class TimeSeriesEstimator(object):

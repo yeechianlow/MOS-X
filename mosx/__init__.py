@@ -86,11 +86,11 @@ Version history
 
 """
 
-import bufr
-import estimators
-import obs
-import model
-import util
-import verification
+from . import bufr
+from .util import *
+from .estimators import *
+from . import obs
+from . import model
+from . import verification
 
 __version__ = '0.10.3'

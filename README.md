@@ -1,4 +1,4 @@
-# AWNMOS (modified version of MOS-X by Jon Weyn for WSU AgWeatherNet)
+# MOS-X (modified version of Jonathan Weyn's original repository)
 
 MOS-X is a machine learning-based forecasting model built in Python designed to produce output tailored for the [WxChallenge](http://www.wxchallenge.com) weather forecasting competition.
 It uses an external executable to download and process time-height profiles of model data from the National Centers for Environmental Prediction (NCEP) Global Forecast System (GFS) and North American Mesoscale (NAM) models.

@@ -15,7 +15,7 @@ from datetime import datetime, timedelta
 import pickle
 from collections import OrderedDict
 from mosx.MesoPy import Meso
-from siphon.simplewebservice.wyoming import WyomingUpperAir
+#from metpy.io import get_upper_air_data
 from metpy.calc import interp
 from mosx.util import generate_dates, get_array, read_pkl
 
@@ -59,11 +59,11 @@ def upper_air(config, station_id, sounding_station_id, date, use_nan_sounding=Fa
         retrieve_sounding = True
     if retrieve_sounding:
         try:
-            dset = WyomingUpperAir.request_data(date, config['Obs']['sounding_station_id'])
+            dset = get_upper_air_data(date, sounding_station_id)
         except:
             # Try again
             try:
-                dset = WyomingUpperAir.request_data(date, config['Obs']['sounding_station_id'])
+                dset = get_upper_air_data(date, sounding_station_id)
             except:
                 if use_nan_sounding:
                     if config['verbose']:
@@ -155,12 +155,12 @@ def get_obs_hourly(config, station_id, api_dates, vars_api, units):
         obs_hourly = obspd[pd.DatetimeIndex(obspd[datename]).minute == minute_mode]
         obs_hourly.date_time = pd.to_datetime(obs_hourly[datename].values)
         obs_hourly = obs_hourly.set_index(datename)
-
-        # May not have precip if none is recorded
-        try:
-            obs_hourly['precip_accum_one_hour'].fillna(0.0, inplace=True)
-        except KeyError:
-            obs_hourly['precip_accum_one_hour'] = 0.0
+        if 'precip_accum_one_hour' in vars_api:
+            # May not have precip if none is recorded
+            try:
+                obs_hourly['precip_accum_one_hour'].fillna(0.0, inplace=True)
+            except KeyError:
+                obs_hourly['precip_accum_one_hour'] = 0.0
 
         # Need to reorder the column names
         obs_hourly.sort_index(axis=1, inplace=True)
@@ -192,6 +192,7 @@ def reindex_hourly(df, start, end, interval, end_23z=False, use_rain_max=False):
     else:
         new_end = end
     period = pd.date_range(start, end, freq='%dH' % interval)
+
     # Create a column with the new index an ob falls into
     if type(df.index.values[0]) == np.int64: #observations from csv file
         df.date_time=np.array([datetime.strptime(date, '%Y-%m-%d %H:%M:%S') for date in df['date_time'].values],dtype='datetime64[s]')
@@ -217,7 +218,7 @@ def reindex_hourly(df, start, end, interval, end_23z=False, use_rain_max=False):
     return df_reindex
 
 
-def obs(config, output_files=None, csv_files=None, num_hours=24, interval=3, use_nan_sounding=False, use_existing_sounding=True):
+def obs(config, output_files=None, csv_files=None, num_hours=24, interval=3,use_nan_sounding=False, use_existing_sounding=True):
     """
     Generates observation data from MesoWest and UCAR soundings and saves to a file, which can later be retrieved for
     either training data or model run data.
@@ -263,26 +264,22 @@ def obs(config, output_files=None, csv_files=None, num_hours=24, interval=3, use
         # Retrieve station data
         if not os.path.exists(csv_file): #no observations saved yet
             # Look for desired variables
-            vars_request = ['air_temp', 'altimeter', 'precip_accum_one_hour', 'relative_humidity',
-                        'wind_speed', 'wind_direction']
-        
-            vars_option = ['air_temp_low_6_hour', 'air_temp_high_6_hour', 'precip_accum_six_hour']
+            vars_request = []
+            vars = ['air_temp', 'altimeter', 'precip_accum_one_hour', 'relative_humidity','wind_speed', 'wind_direction','air_temp_low_6_hour', 'air_temp_high_6_hour', 'precip_accum_six_hour']
             m = Meso(token=config['meso_token'])
             if config['verbose']:
                 print('obs: MesoPy initialized for station %s' % config['station_id'])
                 print('obs: retrieving latest obs and metadata')
             latest = m.latest(stid=station_id)
             obs_list = list(latest['STATION'][0]['SENSOR_VARIABLES'].keys())
-    
             # Add variables to the api request if they exist
             if config['verbose']:
                 print('obs: searching for 6-hourly variables...')
-            for var in vars_option:
+            for var in vars:
                 if var in obs_list:
                     if config['verbose']:
                         print('obs: found variable %s, adding to data' % var)
                     vars_request += [var]
-        
     
             # Add variables to the api request
             vars_api = ''
@@ -297,23 +294,24 @@ def obs(config, output_files=None, csv_files=None, num_hours=24, interval=3, use
                 all_obs_hourly.to_csv(csv_file)
                 if config['verbose']:
                     print('obs: saving observations to csv file succeeded')
-                with open('%s/%s_obs_vars_request.txt' % (config['SITE_ROOT'], station_id),'wb') as fp:
-                    pickle.dump(vars_request, fp, protocol=2)
-                if config['verbose']:
-                    print('obs: saving vars request list to txt file succeeded')
             except BaseException as e:
                 if config['verbose']:
                     print("obs: warning: '%s' while saving observations" % str(e))
-            obs_hourly = all_obs_hourly[['air_temp', 'altimeter', 'precip_accum_one_hour', 'relative_humidity',
-                        'wind_speed', 'wind_direction']] #subset of data used as predictors
+            if 'precip_accum_one_hour' in vars_request:
+                obs_hourly = all_obs_hourly[['air_temp','altimeter','precip_accum_one_hour','relative_humidity','wind_speed','wind_direction']] #subset of data used as predictors
+            else:
+                obs_hourly = all_obs_hourly[['air_temp','altimeter','relative_humidity','wind_speed','wind_direction']] #subset of data used as predictors
         else:
             if config['verbose']:
                 print('obs: obtaining observations from csv file') 
             all_obs_hourly = pd.read_csv(csv_file)
-            with open('%s/%s_obs_vars_request.txt' % (config['SITE_ROOT'], station_id),'rb') as fp:
-                vars_request = pickle.load(fp)
-            obs_hourly = all_obs_hourly[['date_time','air_temp', 'altimeter', 'precip_accum_one_hour', 'relative_humidity',
-                        'wind_speed', 'wind_direction']] #subset of data used as predictors
+            vars_request=['air_temp','altimeter','precip_accum_one_hour','relative_humidity','wind_speed', 'wind_direction']
+            for var in vars_request[:]: #see if variable is available, and remove from vars_request list if not
+                try:
+                    obs_hourly = all_obs_hourly[[var]]
+                except KeyError: #no such variable, so remove from vars_request list 
+                    vars_request.remove(var)
+            obs_hourly = all_obs_hourly[['date_time']+vars_request] #subset of data used as predictors
     
         # Retrieve upper-air sounding data
         soundings = OrderedDict()
@@ -342,7 +340,7 @@ def obs(config, output_files=None, csv_files=None, num_hours=24, interval=3, use
             if config['Obs']['use_soundings'] and date not in soundings.keys():
                 continue
             # Need to ensure we use the right intervals to have 22:5? Z obs
-            start = pd.Timestamp((date - timedelta(hours=num_hours)))
+            start = pd.Timestamp(date - timedelta(hours=num_hours,minutes=-1))
             end = pd.Timestamp(date)
             obs_export['SFC'][date] = reindex_hourly(obs_hourly, start, end, interval,
                                                      end_23z=True).to_dict(into=OrderedDict)

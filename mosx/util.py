@@ -352,10 +352,11 @@ def unpickle(bufr_files, obs_files, verif_files):
     
 def get_ghcn_stid(config, stid):
     """
-    After code by Luke Madaus.
+    After code by Luke Madaus, modified by Yeechian Low to extend functionality to stations outside the U.S.
     Gets the GHCN station ID from the 4-letter station ID.
     :param stid: station ID to obtain data for
     """
+    stid = stid.upper()
     main_addr = 'ftp://ftp.ncdc.noaa.gov/pub/data/noaa'
 
     site_directory = config['SITE_ROOT']
@@ -375,34 +376,84 @@ def get_ghcn_stid(config, stid):
             print('get_ghcn_stid: unable to download site name database')
             print("*** Reason: '%s'" % str(e))
 
-    # Now open this file and look for our siteid
-    site_found = False
+    # Now open this file and look for lat/lon coordinates of station
+    station_isds = []
+    station_isds_99999 = [] #has '99999' in one of the IDs, so not ideal; used only if no station in station_isds
     infile = open(stations_filename, 'r')
-    station_wbans = []
-    station_ghcns = []
     for line in infile:
-        if stid.upper() in line:
-            linesp = line.split()
-            if (not linesp[0].startswith('99999') and not site_found
-                    and not linesp[1].startswith('99999')):
-                try:
-                    site_wban = int(linesp[0])
-                    station_ghcn = int(linesp[1])
-                    # site_found = True
-                    print('get_ghcn_stid: site found for %s (%s)' %
-                          (stid, station_ghcn))
-                    station_wbans.append(site_wban)
-                    station_ghcns.append(station_ghcn)
-                except:
-                    continue
-    if len(station_wbans) == 0:
+        linesp = line.split()
+        if stid in linesp:
+            try: 
+                lat = float(line[57:64])
+                lon = float(line[65:73])
+                if (not linesp[0].startswith('99999') and not linesp[1].startswith('99999')):
+                    station_isds.append(int(linesp[1]))
+                    break
+                else:
+                    station_isds_99999.append(int(linesp[1]))
+            except:
+                continue
+    if len(station_isds) == 0 and len(station_isds_99999) == 0: #no station found
         raise ValueError('get_ghcn_stid error: no station found for %s' % stid)
+    elif len(station_isds) == 0: #only station with '99999' in one of the IDs is found
+        station_isd = station_isds_99999[0]
+    else: #use regular station without '99999' in any ID
+        station_isd = station_isds[0]   
 
-    # Format station as USW...
-    usw_format = 'USW000%05d'
-    return usw_format % station_ghcns[0]
+    if stid[0] == 'K' or stid[0:2] == 'PA' or stid[0:2] == 'PF' or stid[0:2] == 'PG' or stid[0:2] == 'PH' or stid[0:2] == 'PJ' or stid[0:2] == 'PK' or stid[0:2] == 'PM' or stid[0:2] == 'PO' or stid[0:2] == 'PP' or stid[0:2] == 'PW': #U.S. stations
+        usw_format = 'USW000%05d'
+        print("get_ghcn_stid: found long station id: "+usw_format % station_isd)
+        return usw_format % station_isd
 
+    ghcnd_file = 'ghcnd-inventory.txt'
+    ghcnd_filename = '%s/%s' % (site_directory, ghcnd_file)
+    if not os.path.exists(ghcnd_filename):
+        print('get_ghcn_stid: downloading site name database')
+        try:
+            from urllib.request import urlopen
+            response = urlopen('%s/%s/%s' % (main_addr[:-4], "ghcn/daily", ghcnd_file))
+            print('%s/%s/%s' % (main_addr[:-4], "ghcn/daily", ghcnd_file))
+            f = open(ghcnd_filename, 'wb')
+            f.write(response.read())
+            f.close()
+        except BaseException as e:
+            print('get_ghcn_stid: unable to download ghcnd name database')
+            print("*** Reason: '%s'" % str(e))
 
+    # Now open ghcnd file and look for full siteid using lat/lon coordinates
+    best_stid_ghcnd = None
+    best_num_years = -1
+    stid_ghcnd = None
+    infile = open(ghcnd_filename, 'r')
+    for line in infile:
+        linesp = line.split()
+        try:
+            lat_found = round(float(linesp[1]),3)
+            lon_found = round(float(linesp[2]),3)
+            if (stid_ghcnd is None or stid_ghcnd != linesp[0]) and abs(lat_found-lat) < 0.05 and abs(lon_found-lon) < 0.05: #found station
+                stid_ghcnd = linesp[0]
+                tmax_years = [0,0]
+                tmin_years = [0,0]
+                precip_years = [0,0]
+            if stid_ghcnd == linesp[0]:
+                if linesp[3] == 'TMAX':
+                    tmax_years = [int(linesp[4]),int(linesp[5])]
+                elif linesp[3] == 'TMIN':
+                    tmin_years = [int(linesp[4]),int(linesp[5])]
+                elif linesp[3] == 'PRCP':
+                    precip_years = [int(linesp[4]),int(linesp[5])]
+                if tmax_years[0] != 0 and tmin_years[0] != 0 and precip_years[0] != 0:
+                    num_years = min(tmax_years[1],tmin_years[1],precip_years[1])-max(2010,tmax_years[0],tmin_years[0],precip_years[0])
+                    if (num_years > best_num_years): #found a better station (more available years)
+                        best_stid_ghcnd = stid_ghcnd
+                        best_num_years = num_years
+        except:
+            continue
+    if best_stid_ghcnd is None:
+        raise ValueError('get_ghcn_stid error: no station found for %s' % stid)
+    else:
+        print('get_ghcn_stid: found station id: '+str(best_stid_ghcnd))
+        return best_stid_ghcnd
 # ==================================================================================================================== #
 # Conversion functions
 # ==================================================================================================================== #

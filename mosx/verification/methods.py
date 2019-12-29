@@ -181,7 +181,7 @@ def _cf6(config, station_id):
 
 def _climo(config, station_id, dates=None):
     """
-     Fetches climatological wind data using ulmo package to retrieve NCDC archives.
+     Fetches climo data using ulmo package to retrieve NCDC archives.
     :param config:
     :param station_id: station ID to obtain cf6 files for
     :param dates: list of datetime objects
@@ -192,16 +192,26 @@ def _climo(config, station_id, dates=None):
     if config['verbose']:
         print('_climo: fetching data from NCDC (may take a while)...')
     climo_dict = {}
-    D = ulmo.ncdc.ghcn_daily.get_data(get_ghcn_stid(config, station_id), as_dataframe=True, elements=['TMAX','TMIN','WSF2','PRCP'])
+    
+    ghcn_stid = get_ghcn_stid(config, station_id)
+    try:
+        D = ulmo.ncdc.ghcn_daily.get_data(ghcn_stid, as_dataframe=True, elements=['TMAX','TMIN','WSF2','PRCP'])
+        wind = D['WSF2']
+        use_wind = True
+    except KeyError: #no maximum wind data, perhaps because station is outside U.S.
+        D = ulmo.ncdc.ghcn_daily.get_data(ghcn_stid, as_dataframe=True, elements=['TMAX','TMIN','PRCP'])
+        use_wind = False
 
     if dates is None:
-        dates = list(D['WSF2'].index.to_timestamp().to_pydatetime())
+        dates = list(D['TMAX'].index.to_timestamp().to_pydatetime())
     for date in dates:
-        climo_dict[date] = {}
         try:
+            a = D['TMAX'].loc[date]
+            climo_dict[date] = {}
             climo_dict[date]['max_temp'] = D['TMAX'].loc[date]['value']*0.18+32.0
             climo_dict[date]['min_temp'] = D['TMIN'].loc[date]['value']*0.18+32.0
-            climo_dict[date]['wind'] = D['WSF2'].loc[date]['value'] / 10. * 1.94384
+            if use_wind:
+                climo_dict[date]['wind'] = D['WSF2'].loc[date]['value'] / 10. * 1.94384
             climo_dict[date]['precip'] = D['PRCP'].loc[date]['value'] / 254.0
         except KeyError: #missing data
             if config['verbose']:
@@ -255,8 +265,8 @@ def verification(config, output_files=None, csv_files=None, use_cf6=True, use_cl
     :param config:
     :param output_files: str: output file path if just one station, or list of output file paths if multiple stations
     :param csv_files: str: path to csv file containing observations if just one station, or list of paths to csv files if multiple stations
-    :param use_cf6: bool: if True, uses wind values from CF6 files
-    :param use_climo: bool: if True, uses wind values from NCDC climatology
+    :param use_cf6: bool: if True, uses data from CF6 files (only for U.S. stations)
+    :param use_climo: bool: if True, uses data from NCDC climatology
     :param force_rain_quantity: if True, returns the actual quantity of rain (rather than POP); useful for validation
     files
     :return:
@@ -292,11 +302,17 @@ def verification(config, output_files=None, csv_files=None, use_cf6=True, use_cl
     
         if config['verbose']:
             print('verification: obtaining observations from csv file')
-        with open('%s/%s_obs_vars_request.txt' % (config['SITE_ROOT'], station_id),'rb') as fp:
-            vars_request = pickle.load(fp)
 
         all_obspd = pd.read_csv(csv_file)
-        obspd = all_obspd[['date_time','air_temp','precip_accum_one_hour', 'wind_speed', 'air_temp_low_6_hour', 'air_temp_high_6_hour', 'precip_accum_six_hour']] #subset of data used as verification
+        vars_request=['air_temp','precip_accum_one_hour', 'wind_speed', 'air_temp_low_6_hour', 'air_temp_high_6_hour','precip_accum_six_hour']
+        for var in vars_request[:]: #see if variable is available, and remove from vars_request list if not
+            try:
+                obspd = all_obspd[var]
+                if var == 'precip_accum_one_hour' and (sum(all_obspd['precip_accum_one_hour']) == 0 or np.isnan(sum(all_obspd['precip_accum_one_hour']))): #sometimes precip_accum_one_hour column exists even if there is no real data
+                    vars_request.remove('precip_accum_one_hour')
+            except KeyError: #no such variable, so remove from vars_request list 
+                vars_request.remove(var)
+        obspd = all_obspd[['date_time']+vars_request] #subset of data used as verification
         obspd['date_time']=np.array([datetime.strptime(date, '%Y-%m-%d %H:%M:%S') for date in obspd['date_time'].values],dtype='datetime64[s]')
         if config['verbose']:
             print('verification: setting time back %d hours for daily statistics' % config['forecast_hour_start'])
@@ -317,8 +333,8 @@ def verification(config, output_files=None, csv_files=None, use_cf6=True, use_cl
             return datetime(date.year, date.month, date.day, date.hour)
     
         def last(values):
-            return values.iloc[-1]
-    
+            return values.iloc[-1] 
+
         aggregate = {datename: hour}
         if 'air_temp_high_6_hour' in vars_request and 'air_temp_low_6_hour' in vars_request:
             aggregate['air_temp_high_6_hour'] = np.max
@@ -327,7 +343,8 @@ def verification(config, output_files=None, csv_files=None, use_cf6=True, use_cl
         if 'precip_accum_six_hour' in vars_request:
             aggregate['precip_accum_six_hour'] = np.max
         aggregate['wind_speed'] = np.max
-        aggregate['precip_accum_one_hour'] = np.max
+        if 'precip_accum_one_hour' in vars_request:
+            aggregate['precip_accum_one_hour'] = np.max
     
         if config['verbose']:
             print('verification: grouping data by hour for hourly observations')
@@ -381,10 +398,14 @@ def verification(config, output_files=None, csv_files=None, use_cf6=True, use_cl
         aggregate[datename] = day
         aggregate['air_temp_min'] = np.min
         aggregate['air_temp_max'] = np.max
-        aggregate['air_temp_low_6_hour'] = min_or_nan
-        aggregate['air_temp_high_6_hour'] = max_or_nan
-        aggregate['precip_accum_one_hour'] = np.sum
-        aggregate['precip_accum_six_hour'] = np.sum
+        if 'air_temp_high_6_hour' in vars_request and 'air_temp_low_6_hour' in vars_request:
+            aggregate['air_temp_low_6_hour'] = min_or_nan
+            aggregate['air_temp_high_6_hour'] = max_or_nan
+        aggregate['wind_speed'] = np.max
+        if 'precip_accum_one_hour' in vars_request:
+            aggregate['precip_accum_one_hour'] = np.sum
+        if 'precip_accum_six_hour' in vars_request:
+            aggregate['precip_accum_six_hour'] = np.sum
         
         try:
             aggregate.pop('air_temp')
@@ -447,25 +468,30 @@ def verification(config, output_files=None, csv_files=None, use_cf6=True, use_cl
                     
             if 'precip_accum_six_hour' in vars_request:
                 precip_var = 'precip_accum_six_hour'
-            else:
+                obs_precip = round(row[precip_var],2)
+            elif 'precip_accum_one_hour' in vars_request:
                 precip_var = 'precip_accum_one_hour'
+                obs_precip = round(row[precip_var],2)
+            else:
+                precip_var = 'precip_accum_six_hour'
+                obs_precip = np.nan
+                use_cf6_precip = True #no precip data in METARs
                 
             obs_max_temp = row[max_temp_var]
             obs_min_temp = row[min_temp_var]
             obs_wind = row['wind_speed']
-            obs_precip = round(row[precip_var],2)
+            obs_daily.loc[index, 'wind_speed'] = obs_wind
+
             if np.isnan(obs_max_temp) and np.isnan(obs_min_temp): #if high or low temperature is missing, chances are some precipitation data is missing too
                 use_cf6_precip = True
             
             # Check for missing or incorrect 6-hour precipitation amounts. If there are any, use sum of 1-hour precipitation amounts if none are missing.
-            skip_date = False
             if 'precip_accum_six_hour' in vars_request: #6-hour precipitation amounts were used
                 daily_precip = 0.0
                 for hour in [5,11,17,23]: #check the 4 times which should have 6-hour precipitation amounts
                     try:
                         obs_6hr_precip = round(obs_hourly_copy['precip_accum_six_hour'][pd.Timestamp(date.year,date.month,date.day,hour)],2)
                     except KeyError: #incomplete data for date
-                        skip_date = True
                         use_cf6_precip = True
                         break
                     if np.isnan(obs_6hr_precip):
@@ -483,41 +509,43 @@ def verification(config, output_files=None, csv_files=None, use_cf6=True, use_cl
                 if (round(daily_precip,2) > round(obs_precip,2) and not use_cf6_precip):
                     print('verification: warning: incorrect obs precip of %0.2f for %s, using summed one hour accumulation value of %0.2f' % (obs_precip,date,daily_precip))
                     obs_daily.loc[index, 'precip_accum_six_hour'] = daily_precip
-            else: #1-hour precipitation amounts were used
+            elif 'precip_accum_one_hour' in vars_request: #1-hour precipitation amounts were used
                 for hour in range(24):
                     try:
                         obs_hourly_precip = obs_hourly_copy['precip_accum_one_hour'][pd.Timestamp(date.year,date.month,date.day,hour)]
                     except KeyError: #incomplete data for date
-                        skip_date = True
+                        use_cf6_precip = True
                         break
                     if np.isnan(obs_hourly_precip):
                         use_cf6_precip = True
-            if skip_date:
-                obs_daily.loc[index,max_temp_var] = np.nan
-                obs_daily.loc[index,min_temp_var] = np.nan
-                obs_daily.loc[index,'wind_speed'] = np.nan
-                obs_daily.loc[index,precip_var] = np.nan
-            if date in climo_values.keys() and not skip_date:
+                        break
+            if date in climo_values.keys():
                 count_rows += 1
-                cf6_max_temp = climo_values[date]['max_temp']
-                cf6_min_temp = climo_values[date]['min_temp']
-                cf6_wind = climo_values[date]['wind']
-                cf6_precip = climo_values[date]['precip']
-                if not (np.isnan(cf6_max_temp)) and cf6_max_temp > -900.0 and np.isnan(obs_max_temp):
+                try:
+                    cf6_max_temp = climo_values[date]['max_temp']
+                    cf6_min_temp = climo_values[date]['min_temp']
+                    cf6_precip = climo_values[date]['precip']
+                except KeyError:
+                    continue
+                if not (np.isnan(cf6_max_temp)) and cf6_max_temp > -900.0 and (np.isnan(obs_max_temp) or max_temp_var == 'air_temp_max'):
                     print('verification: warning: missing obs max temp for %s, using cf6/climo value of %d' % (date,round(cf6_max_temp,0)))
                     obs_daily.loc[index, max_temp_var] = cf6_max_temp
-                if not (np.isnan(cf6_min_temp)) and cf6_min_temp < 900.0 and np.isnan(obs_min_temp):
+                if not (np.isnan(cf6_min_temp)) and cf6_min_temp < 900.0 and (np.isnan(obs_min_temp) or min_temp_var == 'air_temp_min'):
                     print('verification: warning: missing obs min temp for %s, using cf6/climo value of %d' % (date,round(cf6_min_temp,0)))
                     obs_daily.loc[index, min_temp_var] = cf6_min_temp
-                if not (np.isnan(cf6_wind)):
-                    if obs_wind > cf6_wind and obs_wind < cf6_wind + 10:
-                        print('verification: warning: obs wind for %s larger than wind from cf6/climo; using obs' % 
+                try:
+                    cf6_wind = climo_values[date]['wind']
+                    if not (np.isnan(cf6_wind)):
+                        if obs_wind > cf6_wind and obs_wind < cf6_wind + 10:
+                            print('verification: warning: obs wind for %s larger than wind from cf6/climo; using obs' % 
                               date)
+                        else:
+                            obs_daily.loc[index, 'wind_speed'] = cf6_wind
                     else:
-                        obs_daily.loc[index, 'wind_speed'] = cf6_wind
-                else:
-                    count_rows -= 1
-                if not (np.isnan(cf6_precip)) and cf6_precip > -900.0 and use_cf6_precip and round(cf6_precip,2) > round(obs_precip,2):
+                        count_rows -= 1
+                except KeyError: #no maximum wind data, perhaps because station is outside U.S.
+                    obs_daily.loc[index, 'wind_speed'] = 1.2*obs_daily.loc[index, 'wind_speed'] #1.2 is approximate factor between max wind speed in hourly obs and true max wind speed       
+                if not (np.isnan(cf6_precip)) and cf6_precip > -900.0 and use_cf6_precip and (np.isnan(obs_precip) or round(cf6_precip,2) > round(obs_precip,2)):
                     print('verification: warning: incorrect obs precip of %0.2f for %s, using cf6/climo value of %0.2f' % (obs_precip,date,cf6_precip))
                     obs_daily.loc[index, precip_var] = cf6_precip
         if config['verbose']:
@@ -549,8 +577,10 @@ def verification(config, output_files=None, csv_files=None, use_cf6=True, use_cl
             obs_daily.rename(columns={'air_temp_min': 'Tmin'}, inplace=True)
         if 'precip_accum_six_hour' in vars_request:
             obs_daily.rename(columns={'precip_accum_six_hour': 'Rain'}, inplace=True)
-        else:
+        elif 'precip_accum_one_hour' in vars_request:
             obs_daily.rename(columns={'precip_accum_one_hour': 'Rain'}, inplace=True)
+        else:
+            obs_daily.rename(columns={'precip_accum_six_hour': 'Rain'}, inplace=True)
         obs_daily.rename(columns={'wind_speed': 'Wind'}, inplace=True)
     
         # Deal with the rain depending on the type of forecast requested
@@ -572,22 +602,27 @@ def verification(config, output_files=None, csv_files=None, use_cf6=True, use_cl
     
         # If a time series is desired, then get hourly data from csv file
         if config['Model']['predict_timeseries']:
-            obs_hourly_verify = all_obspd[['date_time', 'air_temp', 'relative_humidity', 'wind_speed', 'precip_accum_one_hour']] #subset of data used as verification
+            if 'precip_accum_one_hour' in vars_request: #hourly rainfall data exists
+                obs_hourly_verify = all_obspd[['date_time', 'air_temp', 'relative_humidity', 'wind_speed', 'precip_accum_one_hour']] #subset of data used as verification
     
-            # Fix rainfall for categorical and time accumulation
-            rain_column = 'precip_last_%d_hour' % config['time_series_interval']
-            obs_hourly_verify.rename(columns={'precip_accum_one_hour': rain_column}, inplace=True)
-            if config['Model']['rain_forecast_type'] == 'pop' and not force_rain_quantity:
-                if config['verbose']:
-                    print("verification: using 'pop' rain")
-                obs_hourly_verify.loc[:, rain_column] = pop_rain(obs_hourly_verify[rain_column])
-                use_rain_max = True
-            elif config['Model']['rain_forecast_type'] == 'categorical' and not force_rain_quantity:
-                if config['verbose']:
-                    print("verification: using 'categorical' rain")
-                obs_hourly_verify.loc[:, rain_column] = categorical_rain(obs_hourly_verify[rain_column])
-                use_rain_max = True
-            else:
+                # Fix rainfall for categorical and time accumulation
+                rain_column = 'precip_last_%d_hour' % config['time_series_interval']
+                obs_hourly_verify.rename(columns={'precip_accum_one_hour': rain_column}, inplace=True)
+                if config['Model']['rain_forecast_type'] == 'pop' and not force_rain_quantity:
+                    if config['verbose']:
+                        print("verification: using 'pop' rain")
+                    obs_hourly_verify.loc[:, rain_column] = pop_rain(obs_hourly_verify[rain_column])
+                    use_rain_max = True
+                elif config['Model']['rain_forecast_type'] == 'categorical' and not force_rain_quantity:
+                    if config['verbose']:
+                        print("verification: using 'categorical' rain")
+                    obs_hourly_verify.loc[:, rain_column] = categorical_rain(obs_hourly_verify[rain_column])
+                    use_rain_max = True
+                else:
+                    use_rain_max = False
+            else: #no hourly rainfall data; set it to all zeros
+                obs_hourly_verify = all_obspd[['date_time', 'air_temp', 'relative_humidity', 'wind_speed']] #subset of data used as verification
+                obs_hourly_verify['precip_last_%d_hour' % config['time_series_interval']] = np.zeros((len(obs_hourly_verify['date_time'])))
                 use_rain_max = False
     
         # Export final data
@@ -603,17 +638,16 @@ def verification(config, output_files=None, csv_files=None, use_cf6=True, use_cl
                 continue  # No verification can have missing values
             if config['Model']['predict_timeseries']:
                 start = pd.Timestamp(date + timedelta(hours=(config['forecast_hour_start'] -
-                                                             config['time_series_interval'])))
+                                                             config['time_series_interval']),minutes=1))
                 end = pd.Timestamp(date + timedelta(hours=config['forecast_hour_start'] + 24))
                 try:
-                    series = reindex_hourly(obs_hourly_verify, start, end, config['time_series_interval'],
-                                            use_rain_max=use_rain_max)
+                    series = reindex_hourly(obs_hourly_verify, start, end, config['time_series_interval'],use_rain_max=use_rain_max)
                 except KeyError:
                     # No values for the day
                     if config['verbose']:
                         print('verification: warning: omitting day %s; missing data' % date)
                     continue
-                if series.isnull().values.any():
+                if series.isna().values.any() or len(series) < 25:
                     if config['verbose']:
                         print('verification: warning: omitting day %s; missing data' % date)
                     continue
@@ -661,3 +695,4 @@ def process(config, verif_list):
         return verif_arrays
     else:
         return None
+    

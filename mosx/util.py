@@ -167,9 +167,12 @@ def generate_dates(config, api=False, start_date=None, end_date=None, api_add_ho
             else:
                 year2 = year
             if api:
-                year_start = datetime.strftime(datetime(year, start_dt.month, start_dt.day), '%Y%m%d0000')
-                year_end = datetime.strftime(datetime(year2, end_dt.month, end_dt.day) + time_added, '%Y%m%d%H00')
-                all_dates.append((year_start, year_end))
+                time_start = datetime(year, start_dt.month, start_dt.day)
+                time_end = datetime(year2, end_dt.month, end_dt.day) + time_added
+                year_start = datetime.strftime(time_start, '%Y%m%d0000')
+                year_end = datetime.strftime(time_end, '%Y%m%d%H00')
+                if time_start != time_end: #if there's a non-zero time range 
+                    all_dates.append((year_start, year_end))
             else:
                 year_dates = pd.date_range(datetime(year, start_dt.month, start_dt.day),
                                            datetime(year2, end_dt.month, end_dt.day), freq='D')
@@ -180,14 +183,19 @@ def generate_dates(config, api=False, start_date=None, end_date=None, api_add_ho
         if api:
             for year in range(start_dt.year, end_year):
                 if year == start_dt.year:
-                    year_start = datetime.strftime(datetime(year, start_dt.month, start_dt.day), '%Y%m%d0000')
+                    time_start = datetime(year, start_dt.month, start_dt.day)
+                    year_start = datetime.strftime(time_start, '%Y%m%d0000')
                 else:
-                    year_start = datetime.strftime(datetime(year, 1, 1), '%Y%m%d0000')
+                    time_start = datetime(year, 1, 1)
+                    year_start = datetime.strftime(time_start, '%Y%m%d0000')
                 if year == end_dt.year:
-                    year_end = datetime.strftime(datetime(year, end_dt.month, end_dt.day) + time_added, '%Y%m%d%H00')
+                    time_end = datetime(year, end_dt.month, end_dt.day) + time_added
+                    year_end = datetime.strftime(time_end, '%Y%m%d%H00')
                 else:
-                    year_end = datetime.strftime(datetime(year+1, 1, 1) + time_added, '%Y%m%d%H00')
-                all_dates.append((year_start, year_end))
+                    time_end = datetime(year+1, 1, 1) + time_added
+                    year_end = datetime.strftime(time_end, '%Y%m%d%H00')
+                if time_start != time_end: #if there's a non-zero time range 
+                    all_dates.append((year_start, year_end))
         else:
             pd_dates = pd.date_range(start_dt, end_dt, freq='D')
             for date in pd_dates:
